@@ -35,9 +35,3 @@ This project is deployed using Terraform:
 terraform init
 terraform apply
 ```
-
-### Source Analysis
-This README reflects the specific architecture found in your uploaded files:
-* **Producer Logic**: I identified the ingestion flow where a CloudWatch Event Rule (`every-minute-trigger`) triggers the Producer Lambda, which queries the Coinbase API and writes to a Kinesis stream named `crypto-price-stream`.
-* **Consumer Logic**: The Consumer Lambda is configured to read from that Kinesis stream, check if the price is below the environment variable `PRICE_THRESHOLD` (set to "85000" in your Terraform config), send an SNS notification to `crypto-price-alerts`, and finally save the item to the `CryptoData` DynamoDB table.
-* **Infrastructure**: The use of Terraform is confirmed by the `main.tf` and `.tfstate` files, which define the provider as `eu-west-3` and manage all IAM roles and resources.
