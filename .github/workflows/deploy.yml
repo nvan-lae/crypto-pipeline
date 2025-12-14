@@ -24,7 +24,6 @@ jobs:
 
       - name: Terraform Init
         run: terraform init
-        working-directory: ./crypto-pipeline
 
       - name: Terraform Apply
         run: terraform apply -auto-approve
