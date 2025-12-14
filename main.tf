@@ -2,7 +2,7 @@ provider "aws" {
   region = "eu-west-3"
 }
 
-# --- AWS SETUP ---
+# --- AWS SETUP (DYNAMODB & DATASTREAM) ---
 
 resource "aws_dynamodb_table" "crypto_table" {
   name           = "CryptoData"
@@ -63,7 +63,9 @@ resource "aws_iam_policy" "lambda_policy" {
           "sns:Publish",
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
+          "logs:PutLogEvents",
+          "xray:PutTraceSegments",
+          "xray:PutTelemetryRecords"
         ]
         Resource = "*"
       }
@@ -92,6 +94,10 @@ resource "aws_lambda_function" "producer_lambda" {
   runtime       = "python3.9"
 
   source_code_hash = data.archive_file.producer_zip.output_base64sha256
+
+  tracing_config {
+  mode = "Active"
+  }
 
   environment {
     variables = {
@@ -137,6 +143,10 @@ resource "aws_lambda_function" "consumer_lambda" {
 
   source_code_hash = data.archive_file.consumer_zip.output_base64sha256
 
+  tracing_config {
+  mode = "Active"
+  }
+
   environment {
     variables = {
       TABLE_NAME      = aws_dynamodb_table.crypto_table.name
@@ -151,4 +161,84 @@ resource "aws_lambda_event_source_mapping" "kinesis_trigger" {
   function_name     = aws_lambda_function.consumer_lambda.arn
   starting_position = "LATEST"
   batch_size        = 10
+}
+
+# --- DATA LAKE (S3 & FIREHOSE) ---
+
+resource "aws_s3_bucket" "datalake" {
+  bucket_prefix = "crypto-datalake-"
+  force_destroy = true
+}
+
+resource "aws_iam_role" "firehose_role" {
+  name = "CryptoFirehoseRole"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "firehose.amazonaws.com" }
+    }]
+  })
+}
+
+resource "aws_iam_policy" "firehose_policy" {
+  name = "CryptoFirehosePolicy"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "kinesis:DescribeStream",
+          "kinesis:GetShardIterator",
+          "kinesis:GetRecords",
+          "kinesis:ListShards"
+        ]
+        Resource = aws_kinesis_stream.crypto_stream.arn
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:AbortMultipartUpload",
+          "s3:GetBucketLocation",
+          "s3:GetObject",
+          "s3:ListBucket",
+          "s3:ListBucketMultipartUploads",
+          "s3:PutObject"
+        ]
+        Resource = [
+          aws_s3_bucket.datalake.arn,
+          "${aws_s3_bucket.datalake.arn}/*"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "attach_firehose" {
+  role       = aws_iam_role.firehose_role.name
+  policy_arn = aws_iam_policy.firehose_policy.arn
+}
+
+resource "aws_kinesis_firehose_delivery_stream" "s3_stream" {
+  name        = "crypto-to-s3-stream"
+  destination = "extended_s3"
+
+  kinesis_source_configuration {
+    kinesis_stream_arn = aws_kinesis_stream.crypto_stream.arn
+    role_arn           = aws_iam_role.firehose_role.arn
+  }
+
+  extended_s3_configuration {
+    role_arn   = aws_iam_role.firehose_role.arn
+    bucket_arn = aws_s3_bucket.datalake.arn
+
+    buffering_size     = 1
+    buffering_interval = 60
+
+    compression_format = "GZIP"
+  }
 }
