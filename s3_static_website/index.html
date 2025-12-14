@@ -47,9 +47,6 @@
     </div>
 
     <script>
-        // =========================================================
-        // 1. *** CHANGE THIS *** // Paste your AWS API Gateway URL inside the quotes below
-        // =========================================================
         const apiUrl = 'https://s2x9o7rca4.execute-api.eu-west-3.amazonaws.com/prod/data';
 
         async function loadData() {
@@ -63,22 +60,18 @@
                 const rawData = await response.json();
                 console.log("DynamoDB Response:", rawData); 
 
-                // --- SMART DATA FINDER ---
-                // DynamoDB often returns data inside an "Items" or "body" property.
-                // This block tries to find the array automatically.
                 let dataArray = [];
                 
                 if (Array.isArray(rawData)) {
                     dataArray = rawData;
                 } else if (rawData.Items && Array.isArray(rawData.Items)) {
-                    dataArray = rawData.Items; // Standard DynamoDB format
+                    dataArray = rawData.Items;
                 } else if (rawData.body) {
-                    // Sometimes body is a string that needs parsing again
                     try {
                         const parsedBody = JSON.parse(rawData.body);
                         dataArray = Array.isArray(parsedBody) ? parsedBody : (parsedBody.Items || []);
                     } catch(e) {
-                        dataArray = rawData.body; // If it was already an object
+                        dataArray = rawData.body;
                     }
                 }
 
@@ -86,16 +79,15 @@
                     throw new Error("Found no data array. Check console log for structure.");
                 }
  
-                // Sort by date (oldest to newest) so the chart looks right
                 dataArray.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
 
                 const labels = dataArray.map(item => {
-                    // 2. Change 'timestamp' to your date column name (e.g., 'date', 'time', 'ts')
+                
                     return new Date(item.timestamp).toLocaleTimeString(); 
                 });
 
                 const prices = dataArray.map(item => {
-                    // 3. Change 'price' to your value column name (e.g., 'amount', 'usd', 'value')
+               
                     return item.price; 
                 });
 
@@ -116,7 +108,7 @@
             if (myChart) myChart.destroy();
 
             myChart = new Chart(ctx, {
-                type: 'line', // 'line' is usually better for history than 'bar'
+                type: 'line',
                 data: {
                     labels: labels,
                     datasets: [{
@@ -124,7 +116,7 @@
                         data: dataPoints,
                         borderColor: '#4bc0c0',
                         backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        tension: 0.4, // smooth curves
+                        tension: 0.4,
                         fill: true
                     }]
                 },
