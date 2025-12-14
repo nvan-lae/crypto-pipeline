@@ -68,6 +68,9 @@ resource "aws_iam_policy" "lambda_policy" {
           "kinesis:GetShardIterator",
           "kinesis:DescribeStream",
           "dynamodb:PutItem",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:GetItem",
           "sns:Publish",
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
@@ -249,4 +252,90 @@ resource "aws_kinesis_firehose_delivery_stream" "s3_stream" {
 
     compression_format = "GZIP"
   }
+}
+
+# --- PUBLIC API (READER) ---
+
+# Reader Lambda
+resource "aws_lambda_function" "reader_lambda" {
+  filename      = data.archive_file.consumer_zip.output_path
+  function_name = "CryptoReader"
+  role          = aws_iam_role.lambda_role.arn
+  handler       = "reader.lambda_handler"
+  runtime       = "python3.9"
+
+  environment {
+    variables = {
+      TABLE_NAME = aws_dynamodb_table.crypto_table.name
+    }
+  }
+}
+
+resource "aws_lambda_permission" "allow_public_url" {
+  statement_id           = "AllowPublicFunctionUrlInvocation_v2"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.reader_lambda.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
+
+# Public URL Reader
+resource "aws_lambda_function_url" "reader_url" {
+  function_name      = aws_lambda_function.reader_lambda.function_name
+  authorization_type = "NONE"
+
+  cors {
+    allow_origins = ["*"]
+    allow_methods = ["GET"]
+  }
+}
+
+# --- STATIC WEBSITE (S3) ---
+
+resource "aws_s3_bucket" "website" {
+  bucket_prefix = "crypto-dashboard-"
+  force_destroy = true
+}
+
+# Allow public read access
+resource "aws_s3_bucket_public_access_block" "website_public" {
+  bucket = aws_s3_bucket.website.id
+
+  block_public_acls       = false
+  block_public_policy     = false
+  ignore_public_acls      = false
+  restrict_public_buckets = false
+}
+
+resource "aws_s3_bucket_website_configuration" "website_config" {
+  bucket = aws_s3_bucket.website.id
+
+  index_document {
+    suffix = "index.html"
+  }
+}
+
+resource "aws_s3_bucket_policy" "public_read" {
+  bucket = aws_s3_bucket.website.id
+  depends_on = [aws_s3_bucket_public_access_block.website_public]
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid       = "PublicReadGetObject"
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = "s3:GetObject"
+      Resource  = "${aws_s3_bucket.website.arn}/*"
+    }]
+  })
+}
+
+# Output URL
+output "api_url" {
+  value = aws_lambda_function_url.reader_url.function_url
+}
+
+output "website_url" {
+  value = aws_s3_bucket_website_configuration.website_config.website_endpoint
 }
