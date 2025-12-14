@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My DynamoDB Crypto History</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+            margin: 0;
+        }
+        h1 { margin-bottom: 20px; }
+        .chart-container {
+            position: relative;
+            width: 90%;
+            max-width: 800px;
+            background: #2c2c2c;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        #error-msg {
+            color: #ff6b6b;
+            display: none;
+            margin-bottom: 10px;
+            background: rgba(255, 0, 0, 0.1);
+            padding: 10px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>DynamoDB History</h1>
+    
+    <div id="error-msg"></div>
+
+    <div class="chart-container">
+        <canvas id="historyChart"></canvas>
+    </div>
+
+    <script>
+        // =========================================================
+        // 1. *** CHANGE THIS *** // Paste your AWS API Gateway URL inside the quotes below
+        // =========================================================
+        const apiUrl = 'https://s2x9o7rca4.execute-api.eu-west-3.amazonaws.com/prod/data';
+
+        async function loadData() {
+            try {
+                const response = await fetch(apiUrl);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP Error! Status: ${response.status}`);
+                }
+
+                const rawData = await response.json();
+                console.log("DynamoDB Response:", rawData); 
+
+                // --- SMART DATA FINDER ---
+                // DynamoDB often returns data inside an "Items" or "body" property.
+                // This block tries to find the array automatically.
+                let dataArray = [];
+                
+                if (Array.isArray(rawData)) {
+                    dataArray = rawData;
+                } else if (rawData.Items && Array.isArray(rawData.Items)) {
+                    dataArray = rawData.Items; // Standard DynamoDB format
+                } else if (rawData.body) {
+                    // Sometimes body is a string that needs parsing again
+                    try {
+                        const parsedBody = JSON.parse(rawData.body);
+                        dataArray = Array.isArray(parsedBody) ? parsedBody : (parsedBody.Items || []);
+                    } catch(e) {
+                        dataArray = rawData.body; // If it was already an object
+                    }
+                }
+
+                if (!Array.isArray(dataArray) || dataArray.length === 0) {
+                    throw new Error("Found no data array. Check console log for structure.");
+                }
+ 
+                // Sort by date (oldest to newest) so the chart looks right
+                dataArray.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+
+                const labels = dataArray.map(item => {
+                    // 2. Change 'timestamp' to your date column name (e.g., 'date', 'time', 'ts')
+                    return new Date(item.timestamp).toLocaleTimeString(); 
+                });
+
+                const prices = dataArray.map(item => {
+                    // 3. Change 'price' to your value column name (e.g., 'amount', 'usd', 'value')
+                    return item.price; 
+                });
+
+                renderChart(labels, prices);
+
+            } catch (error) {
+                console.error("Full Error Details:", error);
+                const errDiv = document.getElementById('error-msg');
+                errDiv.style.display = 'block';
+                errDiv.innerText = "Failed to load history: " + error.message;
+            }
+        }
+
+        let myChart;
+
+        function renderChart(labels, dataPoints) {
+            const ctx = document.getElementById('historyChart').getContext('2d');
+            if (myChart) myChart.destroy();
+
+            myChart = new Chart(ctx, {
+                type: 'line', // 'line' is usually better for history than 'bar'
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Price History',
+                        data: dataPoints,
+                        borderColor: '#4bc0c0',
+                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                        tension: 0.4, // smooth curves
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    scales: {
+                        y: {
+                            ticks: { color: '#ddd' },
+                            grid: { color: '#444' }
+                        },
+                        x: {
+                            ticks: { color: '#ddd' },
+                            grid: { display: false }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#fff' } }
+                    }
+                }
+            });
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
